@@ -93,6 +93,12 @@ void read_configuration(const char *file_name) {
             std::getline(iss >> std::ws, secret.secret, '\0');
         } else if (cmd == "queue_dir") {
             iss >> metrics.queue_dir;
+        } else if (cmd == "queue_max_file_size") {
+            iss >> metrics.max_queue_file_size;
+        } else if (cmd == "queue_rotate_after_size") {
+            iss >> metrics.rotate_after_size;
+        } else if (cmd == "queue_max_file_count") {
+            iss >> metrics.max_file_count;
         } else if (cmd == "user") {
             iss >> cf.user;
         } else if (cmd == "group") {
@@ -109,9 +115,6 @@ void read_configuration(const char *file_name) {
             iss >> sender.packet_size;
         } else if (cmd == "interval") {
             iss >> sender.interval_ms;
-            if (sender.interval_ms < 10) {
-                throw std::runtime_error("Invalid interval: " + std::to_string(sender.interval_ms));
-            }
         } else if (cmd == "path4") {
             std::string src_name;
             std::string src_ip;
@@ -213,6 +216,26 @@ void read_configuration(const char *file_name) {
     }
     if (!file.eof()) {
         throw std::system_error(errno, std::system_category(), "Error reading configuration file");
+    }
+
+    if (sender.ports_count < 1 || sender.ports_count > 65536) {
+        throw std::runtime_error("Invalid ports_count: " + std::to_string(sender.ports_count));
+    } else if (sender.src_port < 0 || sender.src_port > 65535 - sender.ports_count + 1) {
+        throw std::runtime_error("Invalid src_port: " + std::to_string(sender.src_port));
+    } else if (sender.dst_port < 0 || sender.dst_port > 65535 - sender.ports_count + 1) {
+        throw std::runtime_error("Invalid dst_port: " + std::to_string(sender.dst_port));
+    } else if (sender.packet_size <= 40 + 20 + 56) {  // IP6+TCP+PacketFormat
+        throw std::runtime_error("Invalid packet_size: " + std::to_string(sender.packet_size));
+    } else if (sender.interval_ms < 10) {
+        throw std::runtime_error("Invalid interval: " + std::to_string(sender.interval_ms));
+    }
+
+    if (metrics.max_file_count <= 0) {
+        throw std::runtime_error("Invalid max_file_count: " + std::to_string(metrics.max_file_count));
+    } else if (metrics.max_queue_file_size <= 0) {
+        throw std::runtime_error("Invalid max_queue_file_size: " + std::to_string(metrics.max_queue_file_size));
+    } else if (metrics.rotate_after_size <= 0 || metrics.rotate_after_size >= metrics.max_queue_file_size) {
+        throw std::runtime_error("Invalid rotate_after_size: " + std::to_string(metrics.rotate_after_size));
     }
 }
 
