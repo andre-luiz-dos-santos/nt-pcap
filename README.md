@@ -36,7 +36,7 @@ Configure the program using the following options.
 
 Options `path4` and `path6` follow a similar pattern: `local-name local-ip remote-name remote-ip`.  If the IP is dynamic, it can be replaced with `-`. At least one end must have a static address.
 
-Files in `queue_dir` are compressed with `zstd`. The program will refuse to start if any unrecognizable file names are found in `queue_dir`. A new metrics file is created when `queue_dir` is empty or `queue_rotate_after_size` bytes have collected in memory. If `queue_dir` has more than `queue_max_file_count` files, metrics will be dropped.
+Files in `queue_dir` are compressed with _zstd_. The program will refuse to start if any unrecognizable file names are found in `queue_dir`. A new metrics file is created when `queue_dir` is empty or `queue_rotate_after_size` bytes have collected in memory. If `queue_dir` has more than `queue_max_file_count` files, metrics will be dropped.
 
 Example configuration file:
 ```text
@@ -58,7 +58,7 @@ path6 myname - def 2001:db8::1
 
 ## Metrics format
 
-The metrics files use TSV format, with each record on a separate line, and are compressed using `zstd`.
+The metrics files use TSV format, with each record on a separate line, and are compressed using _zstd_.
 
 One send event is recorded every `interval` milliseconds.
 Each send event represents 3 packets (TCP, UDP and ICMP).
@@ -86,3 +86,7 @@ r 1730044987400 108 IP6 ICMP w24 ash 2001:db8::1 30045 235
 r 1730044987400 108 IP6 UDP w24 ash 2001:db8::1 30045 235
 r 1730044987400 108 IP6 TCP w24 ash 2001:db8::1 30045 235
 ```
+
+## Grafana
+
+An example program that downloads the metrics files using rsync and imports them into _VictoriaMetrics_ is provided in [vicmet.cr](import/vicmet.cr).
