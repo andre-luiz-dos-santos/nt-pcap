@@ -4,6 +4,11 @@ Send IP4/IP6 TCP/UDP/ICMP packets and count how many have reached the destinatio
 
 ## Build instructions
 
+```
+cd src
+g++ *.cpp -o ../nt -O2 -g -pthread -lpcap -lzstd -lcrypto
+```
+
 ### cmake
 
 ```bash
