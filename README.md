@@ -95,3 +95,10 @@ r 1730044987400 108 IP6 TCP w24 ash 2001:db8::1 30045 235
 ## Grafana
 
 An example program that downloads the metrics files using rsync and imports them into _VictoriaMetrics_ is provided in [vicmet.cr](import/vicmet.cr).
+
+### Examples
+
+Visualization showing multiple network paths in one direction.
+The _Name_ column shows the UDP destination port number.
+
+![Grafana Multiple Paths](images/grafana-multiple-paths.png)
