@@ -35,8 +35,11 @@ void Sender::open() {
 }
 
 void Sender::loop() {
-    char packet4_buf[this->packet_size];
-    char packet6_buf[this->packet_size];
+    std::vector<char> packet4(this->packet_size);
+    std::vector<char> packet6(this->packet_size);
+
+    auto packet4_buf = packet4.data();
+    auto packet6_buf = packet6.data();
 
     memset(packet4_buf, 0, this->packet_size);
     memset(packet6_buf, 0, this->packet_size);
@@ -92,7 +95,7 @@ void Sender::loop() {
             {  // TCP packet
                 char *packet = packet4_buf;
 
-                struct iphdr *iph = (struct iphdr *)packet;
+                auto iph = (struct iphdr *)packet;
                 packet += sizeof(*iph);
 
                 iph->protocol = IPPROTO_TCP;
@@ -100,7 +103,7 @@ void Sender::loop() {
                 iph->daddr = path.dst_addr;
                 iph->check = 0;
 
-                struct tcphdr *tcph = (struct tcphdr *)packet;
+                auto tcph = (struct tcphdr *)packet;
                 packet += sizeof(*tcph);
 
                 tcph->source = htons(curr_src_port);
@@ -140,7 +143,7 @@ void Sender::loop() {
             {  // UDP packet
                 char *packet = packet4_buf;
 
-                struct iphdr *iph = (struct iphdr *)packet;
+                auto iph = (struct iphdr *)packet;
                 packet += sizeof(*iph);
 
                 iph->protocol = IPPROTO_UDP;
@@ -148,7 +151,7 @@ void Sender::loop() {
                 iph->daddr = path.dst_addr;
                 iph->check = 0;
 
-                struct udphdr *udph = (struct udphdr *)packet;
+                auto udph = (struct udphdr *)packet;
                 packet += sizeof(*udph);
 
                 udph->source = htons(curr_src_port);
@@ -179,7 +182,7 @@ void Sender::loop() {
             {  // ICMP packet
                 char *packet = packet4_buf;
 
-                struct iphdr *iph = (struct iphdr *)packet;
+                auto iph = (struct iphdr *)packet;
                 packet += sizeof(*iph);
 
                 iph->protocol = IPPROTO_ICMP;
@@ -187,7 +190,7 @@ void Sender::loop() {
                 iph->daddr = path.dst_addr;
                 iph->check = 0;
 
-                struct icmphdr *icmph = (struct icmphdr *)packet;
+                auto icmph = (struct icmphdr *)packet;
                 packet += sizeof(*icmph);
 
                 icmph->type = ICMP_ECHOREPLY;

@@ -23,6 +23,7 @@ target_compile_options(nt PRIVATE
     -O2
     -Wall
     -Wextra
+    -Wpedantic
     -Wno-deprecated-declarations
 )
 target_sources(nt PRIVATE
