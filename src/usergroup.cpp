@@ -1,8 +1,5 @@
 #include <grp.h>
-#include <linux/prctl.h>
 #include <pwd.h>
-#include <sys/prctl.h>
-#include <sys/resource.h>
 #include <unistd.h>
 
 #include <iostream>
@@ -41,14 +38,4 @@ void switch_user_and_group(std::string username, std::string groupname) {
     if (pw && setuid(pw->pw_uid) != 0) {
         throw std::system_error(errno, std::system_category(), "Error setting user ID to " + std::to_string(pw->pw_uid));
     }
-
-    // Re-enable core dumps.
-    // setuid disables core dumps.
-    ::prctl(PR_SET_DUMPABLE, 1);
-
-    // Set core dump size to unlimited.
-    struct rlimit limit;
-    limit.rlim_cur = RLIM_INFINITY;
-    limit.rlim_max = RLIM_INFINITY;
-    ::setrlimit(RLIMIT_CORE, &limit);
 }

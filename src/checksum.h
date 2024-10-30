@@ -1,7 +1,6 @@
 #ifndef CHECKSUM_H
 #define CHECKSUM_H
 
-#include <linux/ipv6.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/tcp.h>
