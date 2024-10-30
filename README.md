@@ -4,11 +4,6 @@ Send IP4/IP6 TCP/UDP/ICMP packets and count how many have reached the destinatio
 
 ## Build instructions
 
-```
-cd src
-g++ *.cpp -o ../nt -O2 -g -pthread -lpcap -lzstd -lcrypto
-```
-
 ### cmake
 
 ```bash
@@ -16,6 +11,13 @@ mkdir build
 cd build
 cmake ..
 cmake --build .
+```
+
+### Alpine (static linking with musl)
+
+```bash
+apk add g++ libpcap-dev openssl-dev openssl-libs-static zstd-dev zstd-static
+g++ src/*.cpp -o nt -pthread -O2 -flto -fwhole-program -static -lzstd -lcrypto -lpcap -Wno-deprecated-declarations
 ```
 
 ## Configuration
