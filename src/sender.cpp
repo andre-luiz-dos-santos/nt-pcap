@@ -23,6 +23,10 @@
 extern Secret secret;
 extern Metrics metrics;
 
+constexpr uint64_t to_ms(std::chrono::nanoseconds ns) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(ns).count();
+}
+
 void Sender::open() {
     this->sock4 = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
     if (this->sock4 < 0) {
@@ -72,7 +76,7 @@ void Sender::loop() {
 
     static const char ipv6_zeros[16] = {0};
 
-    Ticker tick(this->interval_ms * 1000);  // microseconds
+    Ticker tick(this->interval);
 
     for (int port_idx = 0;; port_idx++) {
         if (port_idx >= this->ports_count) {
@@ -82,7 +86,7 @@ void Sender::loop() {
         const int curr_dst_port = this->dst_port + port_idx;
 
         tick.sleep();
-        time_t index_timestamp_ms = tick.timestamp / 1000;
+        const uint64_t index_timestamp_ms = to_ms(tick.timestamp);
 
         for (const auto &[_, path] : this->paths4) {
             if (path.src_addr == 0 || path.dst_addr == 0) {
@@ -126,7 +130,7 @@ void Sender::loop() {
 
                 memcpy(pf->magic, "TEST", 4);
                 pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = get_realtime_clock() / 1000;
+                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
                 memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
                 memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
 
@@ -164,7 +168,7 @@ void Sender::loop() {
 
                 memcpy(pf->magic, "TEST", 4);
                 pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = get_realtime_clock() / 1000;
+                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
                 memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
                 memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
 
@@ -204,7 +208,7 @@ void Sender::loop() {
 
                 memcpy(pf->magic, "TEST", 4);
                 pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = get_realtime_clock() / 1000;
+                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
                 memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
                 memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
 
@@ -260,7 +264,7 @@ void Sender::loop() {
 
                 memcpy(pf->magic, "TEST", 4);
                 pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = get_realtime_clock() / 1000;
+                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
                 memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
                 memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
 
@@ -296,7 +300,7 @@ void Sender::loop() {
 
                 memcpy(pf->magic, "TEST", 4);
                 pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = get_realtime_clock() / 1000;
+                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
                 memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
                 memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
 
@@ -333,7 +337,7 @@ void Sender::loop() {
 
                 memcpy(pf->magic, "TEST", 4);
                 pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = get_realtime_clock() / 1000;
+                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
                 memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
                 memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
 

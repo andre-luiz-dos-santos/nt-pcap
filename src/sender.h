@@ -2,6 +2,7 @@
 #define SENDER_H
 
 #include <array>
+#include <chrono>
 #include <string>
 #include <unordered_map>
 
@@ -49,7 +50,7 @@ public:
     int dst_port;
     int ports_count;
     int packet_size;
-    int interval_ms;
+    std::chrono::nanoseconds interval;
     std::unordered_map<std::array<char, (MAX_NAME_SIZE + 1) * 2>, Path4, ArrayHash> paths4;
     std::unordered_map<std::array<char, (MAX_NAME_SIZE + 1) * 2>, Path6, ArrayHash> paths6;
 

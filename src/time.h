@@ -8,22 +8,19 @@
 #include <system_error>
 #include <thread>
 
-// time_t is a clock's time in microseconds.
-typedef int64_t time_t;
-
-time_t get_clock(int clock_id);
-time_t get_realtime_clock();
-time_t get_monotime_clock();
+std::chrono::nanoseconds get_clock(int clock_id);
+std::chrono::nanoseconds get_realtime_clock();
+std::chrono::nanoseconds get_monotime_clock();
 
 class Ticker {
 public:
-    time_t timestamp;
-    int interval;
-    int max_interval;
+    std::chrono::nanoseconds timestamp;
+    std::chrono::nanoseconds interval;
+    std::chrono::nanoseconds max_interval;
 
-    Ticker(int interval);
+    Ticker(std::chrono::nanoseconds interval);
     void reset();
-    void reset(time_t now);
+    void reset(std::chrono::nanoseconds now);
     void sleep();
 };
 

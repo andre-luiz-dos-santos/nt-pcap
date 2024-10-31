@@ -114,7 +114,8 @@ void read_configuration(const char *file_name) {
         } else if (cmd == "packet_size") {
             iss >> sender.packet_size;
         } else if (cmd == "interval") {
-            iss >> sender.interval_ms;
+            iss >> i;
+            sender.interval = std::chrono::milliseconds(i);
         } else if (cmd == "path4") {
             std::string src_name;
             std::string src_ip;
@@ -226,8 +227,8 @@ void read_configuration(const char *file_name) {
         throw std::runtime_error("Invalid dst_port: " + std::to_string(sender.dst_port));
     } else if (sender.packet_size <= 40 + 20 + 56) {  // IP6+TCP+PacketFormat
         throw std::runtime_error("Invalid packet_size: " + std::to_string(sender.packet_size));
-    } else if (sender.interval_ms < 10) {
-        throw std::runtime_error("Invalid interval: " + std::to_string(sender.interval_ms));
+    } else if (sender.interval < std::chrono::milliseconds(10)) {
+        throw std::runtime_error("Invalid interval: " + std::to_string(sender.interval.count()) + "ns");
     }
 
     if (metrics.max_file_count <= 0) {
@@ -246,7 +247,7 @@ int main(int argc, char *argv[]) {
     sender.dst_port = 65000;
     sender.ports_count = 100;
     sender.packet_size = 1250;
-    sender.interval_ms = 100;
+    sender.interval = std::chrono::milliseconds(100);
     receiver.dev = "eth0";
 
     // Read configuration files.
