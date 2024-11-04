@@ -1,6 +1,15 @@
 #ifndef SENDER_H
 #define SENDER_H
 
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/icmp6.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+
 #include <array>
 #include <chrono>
 #include <string>
@@ -56,6 +65,8 @@ public:
 
     void open();
     void loop();
+    void send4(Packet &p, sockaddr_in &addr);
+    void send6(Packet &p, sockaddr_in6 &addr);
     void add_path4(const char *src_name, const char *dst_name, Path4 &path);
     void add_path6(const char *src_name, const char *dst_name, Path6 &path);
     bool set_remote_ip4(const char *src_name, const char *dst_name, uint32_t addr);

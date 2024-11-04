@@ -1,15 +1,5 @@
 #include "sender.h"
 
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/icmp6.h>
-#include <netinet/ip.h>
-#include <netinet/ip6.h>
-#include <netinet/ip_icmp.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
-#include <sys/uio.h>
-
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -17,10 +7,8 @@
 #include "checksum.h"
 #include "metrics.h"
 #include "packet.h"
-#include "secret.h"
 #include "time.h"
 
-extern Secret secret;
 extern Metrics metrics;
 
 constexpr uint64_t to_ms(std::chrono::nanoseconds ns) {
@@ -39,32 +27,38 @@ void Sender::open() {
 }
 
 void Sender::loop() {
-    std::vector<char> packet4(this->packet_size);
-    std::vector<char> packet6(this->packet_size);
+    Packet tcp4, udp4, icmp4;
+    Packet tcp6, udp6, icmp6;
 
-    auto packet4_buf = packet4.data();
-    auto packet6_buf = packet6.data();
+    tcp4.init(this->packet_size);
+    tcp4.init_ip4();
+    tcp4.init_tcp4();
+    tcp4.init_pf();
 
-    memset(packet4_buf, 0, this->packet_size);
-    memset(packet6_buf, 0, this->packet_size);
+    udp4.init(this->packet_size);
+    udp4.init_ip4();
+    udp4.init_udp4();
+    udp4.init_pf();
 
-    {
-        auto iph = (struct iphdr *)packet4_buf;
-        memset(iph, 0, sizeof(*iph));
-        iph->ihl = 5;
-        iph->version = 4;
-        iph->tot_len = htons(this->packet_size);
-        iph->id = htons(rand());
-        iph->ttl = 255;
-    }
+    icmp4.init(this->packet_size);
+    icmp4.init_ip4();
+    icmp4.init_icmp4();
+    icmp4.init_pf();
 
-    {
-        auto iph = (struct ip6_hdr *)packet6_buf;
-        memset(iph, 0, sizeof(*iph));
-        iph->ip6_vfc = 0x60;
-        iph->ip6_plen = htons(this->packet_size - sizeof(*iph));
-        iph->ip6_hlim = 255;
-    }
+    tcp6.init(this->packet_size);
+    tcp6.init_ip6();
+    tcp6.init_tcp6();
+    tcp6.init_pf();
+
+    udp6.init(this->packet_size);
+    udp6.init_ip6();
+    udp6.init_udp6();
+    udp6.init_pf();
+
+    icmp6.init(this->packet_size);
+    icmp6.init_ip6();
+    icmp6.init_icmp6();
+    icmp6.init_pf();
 
     struct sockaddr_in dest_addr4;
     memset(&dest_addr4, 0, sizeof(dest_addr4));
@@ -96,131 +90,23 @@ void Sender::loop() {
             // sendto address.
             dest_addr4.sin_addr.s_addr = path.dst_addr;
 
-            {  // TCP packet
-                char *packet = packet4_buf;
+            tcp4.ip4_addrs(path.src_addr, path.dst_addr);
+            tcp4.tcp_ports(curr_src_port, curr_dst_port);
+            tcp4.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            tcp4.checksum_tcp4();
+            this->send4(tcp4, dest_addr4);
 
-                auto iph = (struct iphdr *)packet;
-                packet += sizeof(*iph);
+            udp4.ip4_addrs(path.src_addr, path.dst_addr);
+            udp4.udp_ports(curr_src_port, curr_dst_port);
+            udp4.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            udp4.checksum_udp4();
+            this->send4(udp4, dest_addr4);
 
-                iph->protocol = IPPROTO_TCP;
-                iph->saddr = path.src_addr;
-                iph->daddr = path.dst_addr;
-                iph->check = 0;
-
-                auto tcph = (struct tcphdr *)packet;
-                packet += sizeof(*tcph);
-
-                tcph->source = htons(curr_src_port);
-                tcph->dest = htons(curr_dst_port);
-                tcph->seq = 0;
-                tcph->ack_seq = 0;
-                tcph->doff = 5;
-                tcph->fin = 0;
-                tcph->syn = 0;
-                tcph->rst = 0;
-                tcph->psh = 0;
-                tcph->ack = 1;
-                tcph->urg = 0;
-                tcph->window = htons(5840);
-                tcph->check = 0;
-                tcph->urg_ptr = 0;
-
-                auto pf = (PacketFormat *)packet;
-                packet += sizeof(*pf);
-
-                memcpy(pf->magic, "TEST", 4);
-                pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
-                memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
-                memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
-
-                secret.sign(pf);
-
-                compute_ip_checksum(iph);
-                compute_tcp_checksum(iph, (unsigned short *)tcph);
-
-                if (sendto(this->sock4, packet4_buf, this->packet_size, 0, (struct sockaddr *)&dest_addr4, sizeof(dest_addr4)) < 0) {
-                    throw std::system_error(errno, std::system_category(), "sendto(IPv4/TCP) failed");
-                }
-            }
-
-            {  // UDP packet
-                char *packet = packet4_buf;
-
-                auto iph = (struct iphdr *)packet;
-                packet += sizeof(*iph);
-
-                iph->protocol = IPPROTO_UDP;
-                iph->saddr = path.src_addr;
-                iph->daddr = path.dst_addr;
-                iph->check = 0;
-
-                auto udph = (struct udphdr *)packet;
-                packet += sizeof(*udph);
-
-                udph->source = htons(curr_src_port);
-                udph->dest = htons(curr_dst_port);
-                udph->len = htons(this->packet_size - sizeof(*iph));
-                udph->check = 0;
-
-                auto pf = (PacketFormat *)packet;
-                packet += sizeof(*pf);
-
-                memcpy(pf->magic, "TEST", 4);
-                pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
-                memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
-                memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
-
-                secret.sign(pf);
-
-                compute_ip_checksum(iph);
-                // UDP checksum is optional, so don't waste CPU on it.
-                // compute_udp_checksum(iph, (unsigned short *)udph);
-
-                if (sendto(this->sock4, packet4_buf, this->packet_size, 0, (struct sockaddr *)&dest_addr4, sizeof(dest_addr4)) < 0) {
-                    throw std::system_error(errno, std::system_category(), "sendto(IPv4/UDP) failed");
-                }
-            }
-
-            {  // ICMP packet
-                char *packet = packet4_buf;
-
-                auto iph = (struct iphdr *)packet;
-                packet += sizeof(*iph);
-
-                iph->protocol = IPPROTO_ICMP;
-                iph->saddr = path.src_addr;
-                iph->daddr = path.dst_addr;
-                iph->check = 0;
-
-                auto icmph = (struct icmphdr *)packet;
-                packet += sizeof(*icmph);
-
-                icmph->type = ICMP_ECHOREPLY;
-                icmph->code = 0;
-                icmph->checksum = 0;
-                icmph->un.echo.id = 0;  // htons(getpid());
-                icmph->un.echo.sequence = htons(curr_dst_port);
-
-                auto pf = (PacketFormat *)packet;
-                packet += sizeof(*pf);
-
-                memcpy(pf->magic, "TEST", 4);
-                pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
-                memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
-                memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
-
-                secret.sign(pf);
-
-                compute_ip_checksum(iph);
-                compute_icmp_checksum(icmph, this->packet_size - sizeof(*iph));
-
-                if (sendto(this->sock4, packet4_buf, this->packet_size, 0, (struct sockaddr *)&dest_addr4, sizeof(dest_addr4)) < 0) {
-                    throw std::system_error(errno, std::system_category(), "sendto(IPv4/ICMP) failed");
-                }
-            }
+            icmp4.ip4_addrs(path.src_addr, path.dst_addr);
+            icmp4.icmp4_sequence(curr_dst_port);
+            icmp4.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            icmp4.checksum_icmp4();
+            this->send4(icmp4, dest_addr4);
         }
 
         for (const auto &[_, path] : this->paths6) {
@@ -231,124 +117,23 @@ void Sender::loop() {
             // sendto address.
             memcpy(&dest_addr6.sin6_addr, path.dst_addr, 16);
 
-            {  // TCP packet
-                char *packet = packet6_buf;
+            tcp6.ip6_addrs(path.src_addr, path.dst_addr);
+            tcp6.tcp_ports(curr_src_port, curr_dst_port);
+            tcp6.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            tcp6.checksum_tcp6();
+            this->send6(tcp6, dest_addr6);
 
-                auto iph = (struct ip6_hdr *)packet;
-                packet += sizeof(*iph);
+            udp6.ip6_addrs(path.src_addr, path.dst_addr);
+            udp6.udp_ports(curr_src_port, curr_dst_port);
+            udp6.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            udp6.checksum_udp6();
+            this->send6(udp6, dest_addr6);
 
-                iph->ip6_nxt = IPPROTO_TCP;
-                memcpy(&iph->ip6_src, path.src_addr, 16);
-                memcpy(&iph->ip6_dst, path.dst_addr, 16);
-
-                auto tcph = (struct tcphdr *)packet;
-                packet += sizeof(*tcph);
-
-                tcph->source = htons(curr_src_port);
-                tcph->dest = htons(curr_dst_port);
-                tcph->seq = 0;
-                tcph->ack_seq = 0;
-                tcph->doff = 5;
-                tcph->fin = 0;
-                tcph->syn = 0;
-                tcph->rst = 0;
-                tcph->psh = 0;
-                tcph->ack = 1;
-                tcph->urg = 0;
-                tcph->window = htons(5840);
-                tcph->check = 0;
-                tcph->urg_ptr = 0;
-
-                auto pf = (PacketFormat *)packet;
-                packet += sizeof(*pf);
-
-                memcpy(pf->magic, "TEST", 4);
-                pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
-                memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
-                memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
-
-                secret.sign(pf);
-
-                tcph->check = htons(compute_tcp_checksum_ipv6(iph, tcph, pf, this->packet_size - sizeof(*iph) - sizeof(*tcph)));
-
-                if (sendto(this->sock6, packet6_buf, this->packet_size, 0, (struct sockaddr *)&dest_addr6, sizeof(dest_addr6)) < 0) {
-                    throw std::system_error(errno, std::system_category(), "sendto(IPv6/TCP) failed");
-                }
-            }
-
-            {  // UDP packet
-                char *packet = packet6_buf;
-
-                auto iph = (struct ip6_hdr *)packet;
-                packet += sizeof(*iph);
-
-                iph->ip6_nxt = IPPROTO_UDP;
-                memcpy(&iph->ip6_src, path.src_addr, 16);
-                memcpy(&iph->ip6_dst, path.dst_addr, 16);
-
-                auto udph = (struct udphdr *)packet;
-                packet += sizeof(*udph);
-
-                udph->source = htons(curr_src_port);
-                udph->dest = htons(curr_dst_port);
-                udph->len = htons(this->packet_size - sizeof(*iph));
-                udph->check = 0;
-
-                auto pf = (PacketFormat *)packet;
-                packet += sizeof(*pf);
-
-                memcpy(pf->magic, "TEST", 4);
-                pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
-                memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
-                memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
-
-                secret.sign(pf);
-
-                udph->check = htons(compute_udp_checksum_ipv6(iph, udph, pf, this->packet_size - sizeof(*iph) - sizeof(*udph)));
-
-                if (sendto(this->sock6, packet6_buf, this->packet_size, 0, (struct sockaddr *)&dest_addr6, sizeof(dest_addr6)) < 0) {
-                    throw std::system_error(errno, std::system_category(), "sendto(IPv6/UDP) failed");
-                }
-            }
-
-            {  // ICMPv6 packet
-                char *packet = packet6_buf;
-
-                auto iph = (struct ip6_hdr *)packet;
-                packet += sizeof(*iph);
-
-                iph->ip6_nxt = IPPROTO_ICMPV6;
-                memcpy(&iph->ip6_src, path.src_addr, 16);
-                memcpy(&iph->ip6_dst, path.dst_addr, 16);
-
-                auto icmph = (struct icmp6_hdr *)packet;
-                packet += sizeof(*icmph);
-
-                icmph->icmp6_type = ICMP6_ECHO_REPLY;
-                icmph->icmp6_code = 0;
-                icmph->icmp6_cksum = 0;
-                icmph->icmp6_id = 0;  // htons(getpid());
-                icmph->icmp6_seq = htons(curr_dst_port);
-
-                auto pf = (PacketFormat *)packet;
-                packet += sizeof(*pf);
-
-                memcpy(pf->magic, "TEST", 4);
-                pf->index_timestamp_ms = index_timestamp_ms;
-                pf->sent_timestamp_ms = to_ms(get_realtime_clock());
-                memcpy(pf->src_name, path.src_name, MAX_NAME_SIZE + 1);
-                memcpy(pf->dst_name, path.dst_name, MAX_NAME_SIZE + 1);
-
-                secret.sign(pf);
-
-                icmph->icmp6_cksum = htons(compute_icmpv6_checksum_ipv6(iph, icmph, pf, this->packet_size - sizeof(*iph) - sizeof(*icmph)));
-
-                if (sendto(this->sock6, packet6_buf, this->packet_size, 0, (struct sockaddr *)&dest_addr6, sizeof(dest_addr6)) < 0) {
-                    throw std::system_error(errno, std::system_category(), "sendto(IPv6/ICMPv6) failed");
-                }
-            }
+            icmp6.ip6_addrs(path.src_addr, path.dst_addr);
+            icmp6.icmp6_sequence(curr_dst_port);
+            icmp6.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            icmp6.checksum_icmp6();
+            this->send6(icmp6, dest_addr6);
         }
 
         // Add metrics outside the loop that sends packets.
@@ -374,6 +159,18 @@ void Sender::loop() {
                 path.dst_name,
                 curr_dst_port);
         }
+    }
+}
+
+void Sender::send4(Packet &p, sockaddr_in &addr) {
+    if (sendto(this->sock4, p.vector.data(), p.size, 0, (sockaddr *)&addr, sizeof(addr)) < 0) {
+        throw std::system_error(errno, std::system_category(), "sendto(IPv4) failed");
+    }
+}
+
+void Sender::send6(Packet &p, sockaddr_in6 &addr) {
+    if (sendto(this->sock6, p.vector.data(), p.size, 0, (sockaddr *)&addr, sizeof(addr)) < 0) {
+        throw std::system_error(errno, std::system_category(), "sendto(IPv6) failed");
     }
 }
 

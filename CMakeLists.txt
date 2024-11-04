@@ -37,6 +37,7 @@ target_sources(nt PRIVATE
     src/time.cpp
     src/usergroup.cpp
     src/zstd.cpp
+    src/packet.cpp
 )
 target_include_directories(nt PRIVATE
     ${PCAP_INCLUDE_DIRS}
