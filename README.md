@@ -2,6 +2,13 @@
 
 Send IP4/IP6 TCP/UDP/ICMP packets and count how many have reached the destination, the time it took to arrive and the TTL.
 
+## Examples
+
+Visualization showing multiple network paths in one direction.
+The _Name_ column shows the UDP destination port number.
+
+![Grafana Multiple Paths](images/grafana-multiple-paths.png)
+
 ## Build instructions
 
 ### cmake
@@ -96,11 +103,4 @@ r 1730044987400 108 IP6 TCP w24 ash 2001:db8::1 30045 235
 
 ## Grafana
 
-An example program that downloads the metrics files using rsync and imports them into _VictoriaMetrics_ is provided in [vicmet.cr](import/vicmet.cr).
-
-### Examples
-
-Visualization showing multiple network paths in one direction.
-The _Name_ column shows the UDP destination port number.
-
-![Grafana Multiple Paths](images/grafana-multiple-paths.png)
+An example program that downloads the metrics files using _rsync_ and imports them into [_Victoria Metrics_](https://victoriametrics.com/) is provided in [vicmet.cr](import/vicmet.cr).
