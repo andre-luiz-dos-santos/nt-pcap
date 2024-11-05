@@ -20,11 +20,12 @@ cmake ..
 cmake --build .
 ```
 
-### Alpine (static linking with musl)
+### Docker
+
+Build static binary using an Alpine container.
 
 ```bash
-apk add g++ libpcap-dev openssl-dev openssl-libs-static zstd-dev zstd-static
-g++ src/*.cpp -o nt -pthread -O2 -flto -fwhole-program -static -lzstd -lcrypto -lpcap -Wno-deprecated-declarations
+docker build --output=build .
 ```
 
 ## Configuration
