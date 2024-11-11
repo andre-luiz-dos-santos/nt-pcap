@@ -49,7 +49,7 @@ Configure the program using the following options.
 - `queue_rotate_after_size`: Flush metrics to file after size bytes have collected in memory.
 - `queue_max_file_count`: Maximum number of metrics files in `queue_dir`.
 
-Options `path4` and `path6` follow a similar pattern: `local-name local-ip remote-name remote-ip`.  If the IP is dynamic, it can be replaced with `-`. At least one end must have a static address.
+Options `path4` and `path6` follow a similar pattern: `local-name local-ip remote-name remote-ip`.  If the IP is dynamic, it can be replaced with `-`.
 
 Files in `queue_dir` are compressed with _zstd_. The program will refuse to start if any unrecognizable file names are found in `queue_dir`. A new metrics file is created when `queue_dir` is empty or `queue_rotate_after_size` bytes have collected in memory. If `queue_dir` has more than `queue_max_file_count` files, metrics will be dropped.
 

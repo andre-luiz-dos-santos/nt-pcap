@@ -14,7 +14,7 @@
 #include <thread>
 
 std::chrono::nanoseconds get_clock(int clock_id) {
-    struct timespec t;
+    timespec t;
 
     int ret = clock_gettime(clock_id, &t);
     if (ret < 0) {
@@ -54,14 +54,16 @@ void Ticker::sleep() {
 
     // If interval has already elapsed, reset and return.
     if (diff < std::chrono::nanoseconds(0)) {
-        std::cout << "Ticker::sleep: diff < 0: " << diff.count() << std::endl;
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(diff);
+        std::cout << "Ticker::sleep: diff < 0: " << ms.count() << "ms" << std::endl;
         this->reset(now);
         return;  // no sleep needed
     }
 
     // If the clock has moved back by more than max_interval, reset.
     if (diff >= this->max_interval) {
-        std::cout << "Ticker::sleep: diff >= max_interval: " << diff.count() << std::endl;
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(diff);
+        std::cout << "Ticker::sleep: diff >= max_interval: " << ms.count() << "ms" << std::endl;
         this->reset(now + this->interval);
         diff = this->timestamp - now;  // reset changed this->timestamp
     }

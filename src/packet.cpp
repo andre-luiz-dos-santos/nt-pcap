@@ -100,7 +100,7 @@ void Packet::ip4_addrs(uint32_t src_ip, uint32_t dst_ip) {
     a.ip4->daddr = dst_ip;
 }
 
-void Packet::ip6_addrs(const char src_ip[16], const char dst_ip[16]) {
+void Packet::ip6_addrs(const uint8_t src_ip[16], const uint8_t dst_ip[16]) {
     memcpy(&a.ip6->ip6_src, src_ip, 16);
     memcpy(&a.ip6->ip6_dst, dst_ip, 16);
 }
@@ -123,13 +123,27 @@ void Packet::icmp6_sequence(uint16_t seq) {
     b.icmp6->icmp6_seq = htons(seq);
 }
 
-void Packet::pf_names(int64_t index_timestamp_ms, const char src_name[MAX_NAME_SIZE + 1], const char dst_name[MAX_NAME_SIZE + 1]) {
+void Packet::pf_names(int64_t index_timestamp_ms, const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE]) {
     c.pf->index_timestamp_ms = index_timestamp_ms;
-    memcpy(c.pf->src_name, src_name, MAX_NAME_SIZE + 1);
-    memcpy(c.pf->dst_name, dst_name, MAX_NAME_SIZE + 1);
+    memcpy(c.pf->src_name, src_name, MAX_NAME_SIZE);
+    memcpy(c.pf->dst_name, dst_name, MAX_NAME_SIZE);
 
     int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(get_realtime_clock()).count();
     c.pf->sent_timestamp_ms = now;
+}
+
+void Packet::pf_other4(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], uint32_t ip4, uint64_t index_timestamp_ms) {
+    memcpy(c.pf->other.src_name, src_name, MAX_NAME_SIZE);
+    memcpy(c.pf->other.dst_name, dst_name, MAX_NAME_SIZE);
+    c.pf->other.ip.v4 = ip4;
+    c.pf->other.index_timestamp_ms = index_timestamp_ms;
+}
+
+void Packet::pf_other6(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], const uint8_t ip6[16], uint64_t index_timestamp_ms) {
+    memcpy(c.pf->other.src_name, src_name, MAX_NAME_SIZE);
+    memcpy(c.pf->other.dst_name, dst_name, MAX_NAME_SIZE);
+    memcpy(c.pf->other.ip.v6, ip6, 16);
+    c.pf->other.index_timestamp_ms = index_timestamp_ms;
 }
 
 void Packet::checksum_tcp4() {

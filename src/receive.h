@@ -16,7 +16,7 @@ public:
 
     void open();
     void loop();
-    void receive(const struct pcap_pkthdr *pkthdr, const u_char *packet);
+    void receive(const pcap_pkthdr *pkthdr, const u_char *packet);
 };
 
 #endif

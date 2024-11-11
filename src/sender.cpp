@@ -1,11 +1,13 @@
 #include "sender.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <iostream>
 
 #include "checksum.h"
 #include "metrics.h"
+#include "net.h"
 #include "packet.h"
 #include "time.h"
 
@@ -13,6 +15,44 @@ extern Metrics metrics;
 
 constexpr uint64_t to_ms(std::chrono::nanoseconds ns) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(ns).count();
+}
+
+std::array<char, MAX_NAME_SIZE> build_dst_key(const char name[MAX_NAME_SIZE]) {
+    std::array<char, MAX_NAME_SIZE> key;
+    memcpy(key.data(), name, MAX_NAME_SIZE);
+    return key;
+}
+
+std::array<char, MAX_NAME_SIZE * 2> build_src_dst_key(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE]) {
+    std::array<char, MAX_NAME_SIZE * 2> key;
+    memcpy(key.data(), src_name, MAX_NAME_SIZE);
+    memcpy(key.data() + MAX_NAME_SIZE, dst_name, MAX_NAME_SIZE);
+    return key;
+}
+
+void Sender::index() {
+    for (auto &path : this->paths4_vec) {
+        auto key = build_src_dst_key(path.src_name, path.dst_name);
+        auto [_, ok] = this->paths4_map.try_emplace(key, &path);
+        if (ok == false) {
+            throw std::runtime_error("Path from " + std::string(path.src_name) + " to " + std::string(path.dst_name) + " already exists in paths4");
+        }
+        if (path.dst_ip_dyn == true) {
+            auto dst_key = build_dst_key(path.dst_name);
+            this->dyn_dst_paths4[dst_key].push_back(&path);
+        }
+    }
+    for (auto &path : this->paths6_vec) {
+        auto key = build_src_dst_key(path.src_name, path.dst_name);
+        auto [_, ok] = this->paths6_map.try_emplace(key, &path);
+        if (ok == false) {
+            throw std::runtime_error("Path from " + std::string(path.src_name) + " to " + std::string(path.dst_name) + " already exists in paths6");
+        }
+        if (path.dst_ip_dyn == true) {
+            auto dst_key = build_dst_key(path.dst_name);
+            this->dyn_dst_paths6[dst_key].push_back(&path);
+        }
+    }
 }
 
 void Sender::open() {
@@ -60,15 +100,23 @@ void Sender::loop() {
     icmp6.init_icmp6();
     icmp6.init_pf();
 
-    struct sockaddr_in dest_addr4;
+    sockaddr_in dest_addr4;
     memset(&dest_addr4, 0, sizeof(dest_addr4));
     dest_addr4.sin_family = AF_INET;
 
-    struct sockaddr_in6 dest_addr6;
+    sockaddr_in6 dest_addr6;
     memset(&dest_addr6, 0, sizeof(dest_addr6));
     dest_addr6.sin6_family = AF_INET6;
 
-    static const char ipv6_zeros[16] = {0};
+    std::vector<Path4> paths4(this->paths4_vec.size());
+    std::vector<Path6> paths6(this->paths6_vec.size());
+
+    size_t other4_idx = 0;
+    size_t other6_idx = 0;
+    Path4 other_path4;
+    Path6 other_path6;
+    memset(&other_path4, 0, sizeof(other_path4));
+    memset(&other_path6, 0, sizeof(other_path6));
 
     Ticker tick(this->interval);
 
@@ -79,66 +127,89 @@ void Sender::loop() {
         const int curr_src_port = this->src_port + port_idx;
         const int curr_dst_port = this->dst_port + port_idx;
 
+        {  // Copy to avoid mutex.lock() during the sending loop.
+            std::lock_guard<std::mutex> guard(this->mtx);
+            static_assert(std::is_trivially_copyable<Path4>::value);
+            static_assert(std::is_trivially_copyable<Path6>::value);
+            memcpy(paths4.data(), this->paths4_vec.data(), this->paths4_vec.size() * sizeof(Path4));
+            memcpy(paths6.data(), this->paths6_vec.data(), this->paths6_vec.size() * sizeof(Path6));
+        }
+
+        if (paths4.empty() == false) {
+            if (other4_idx >= paths4.size()) other4_idx = 0;
+            other_path4 = paths4[other4_idx++];
+        }
+        if (paths6.empty() == false) {
+            if (other6_idx >= paths6.size()) other6_idx = 0;
+            other_path6 = paths6[other6_idx++];
+        }
+
         tick.sleep();
         const uint64_t index_timestamp_ms = to_ms(tick.timestamp);
 
-        for (const auto &[_, path] : this->paths4) {
-            if (path.src_addr == 0 || path.dst_addr == 0) {
+        for (const auto &path : paths4) {
+            if (path.src_ip4 == 0 || path.dst_ip4 == 0) {
                 continue;
             }
 
             // sendto address.
-            dest_addr4.sin_addr.s_addr = path.dst_addr;
+            dest_addr4.sin_addr.s_addr = path.dst_ip4;
 
-            tcp4.ip4_addrs(path.src_addr, path.dst_addr);
+            tcp4.ip4_addrs(path.src_ip4, path.dst_ip4);
             tcp4.tcp_ports(curr_src_port, curr_dst_port);
             tcp4.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            tcp4.pf_other4(other_path4.src_name, other_path4.dst_name, other_path4.dst_ip4, other_path4.index_timestamp_ms);
             tcp4.checksum_tcp4();
             this->send4(tcp4, dest_addr4);
 
-            udp4.ip4_addrs(path.src_addr, path.dst_addr);
+            udp4.ip4_addrs(path.src_ip4, path.dst_ip4);
             udp4.udp_ports(curr_src_port, curr_dst_port);
             udp4.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            udp4.pf_other4(other_path4.src_name, other_path4.dst_name, other_path4.dst_ip4, other_path4.index_timestamp_ms);
             udp4.checksum_udp4();
             this->send4(udp4, dest_addr4);
 
-            icmp4.ip4_addrs(path.src_addr, path.dst_addr);
+            icmp4.ip4_addrs(path.src_ip4, path.dst_ip4);
             icmp4.icmp4_sequence(curr_dst_port);
             icmp4.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            icmp4.pf_other4(other_path4.src_name, other_path4.dst_name, other_path4.dst_ip4, other_path4.index_timestamp_ms);
             icmp4.checksum_icmp4();
             this->send4(icmp4, dest_addr4);
         }
 
-        for (const auto &[_, path] : this->paths6) {
-            if (memcmp(path.src_addr, ipv6_zeros, 16) == 0 || memcmp(path.dst_addr, ipv6_zeros, 16) == 0) {
+        for (const auto &path : paths6) {
+            if (memcmp(path.src_ip6, ipv6_zeros, 16) == 0 || memcmp(path.dst_ip6, ipv6_zeros, 16) == 0) {
                 continue;
             }
 
             // sendto address.
-            memcpy(&dest_addr6.sin6_addr, path.dst_addr, 16);
+            memcpy(&dest_addr6.sin6_addr, path.dst_ip6, 16);
 
-            tcp6.ip6_addrs(path.src_addr, path.dst_addr);
+            tcp6.ip6_addrs(path.src_ip6, path.dst_ip6);
             tcp6.tcp_ports(curr_src_port, curr_dst_port);
             tcp6.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            tcp6.pf_other6(other_path6.src_name, other_path6.dst_name, other_path6.dst_ip6, other_path6.index_timestamp_ms);
             tcp6.checksum_tcp6();
             this->send6(tcp6, dest_addr6);
 
-            udp6.ip6_addrs(path.src_addr, path.dst_addr);
+            udp6.ip6_addrs(path.src_ip6, path.dst_ip6);
             udp6.udp_ports(curr_src_port, curr_dst_port);
             udp6.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            udp6.pf_other6(other_path6.src_name, other_path6.dst_name, other_path6.dst_ip6, other_path6.index_timestamp_ms);
             udp6.checksum_udp6();
             this->send6(udp6, dest_addr6);
 
-            icmp6.ip6_addrs(path.src_addr, path.dst_addr);
+            icmp6.ip6_addrs(path.src_ip6, path.dst_ip6);
             icmp6.icmp6_sequence(curr_dst_port);
             icmp6.pf_names(index_timestamp_ms, path.src_name, path.dst_name);
+            icmp6.pf_other6(other_path6.src_name, other_path6.dst_name, other_path6.dst_ip6, other_path6.index_timestamp_ms);
             icmp6.checksum_icmp6();
             this->send6(icmp6, dest_addr6);
         }
 
         // Add metrics outside the loop that sends packets.
-        for (const auto &[_, path] : this->paths4) {
-            if (path.src_addr == 0 || path.dst_addr == 0) {
+        for (const auto &path : paths4) {
+            if (path.src_ip4 == 0 || path.dst_ip4 == 0) {
                 continue;
             }
             metrics.add_sent_point(
@@ -148,8 +219,8 @@ void Sender::loop() {
                 path.dst_name,
                 curr_dst_port);
         }
-        for (const auto &[_, path] : this->paths6) {
-            if (memcmp(path.src_addr, ipv6_zeros, 16) == 0 || memcmp(path.dst_addr, ipv6_zeros, 16) == 0) {
+        for (const auto &path : paths6) {
+            if (memcmp(path.src_ip6, ipv6_zeros, 16) == 0 || memcmp(path.dst_ip6, ipv6_zeros, 16) == 0) {
                 continue;
             }
             metrics.add_sent_point(
@@ -174,100 +245,132 @@ void Sender::send6(Packet &p, sockaddr_in6 &addr) {
     }
 }
 
-void Sender::add_path4(const char *src_name, const char *dst_name, Path4 &path) {
-    std::array<char, (MAX_NAME_SIZE + 1) * 2> key;
-    memset(key.data(), 0, key.size());
-    strcpy(key.data(), src_name);
-    strcpy(key.data() + MAX_NAME_SIZE + 1, dst_name);
-
-    if (this->paths4.find(key) != this->paths4.end()) {
-        throw std::runtime_error("Path from " + std::string(src_name) + " to " + std::string(dst_name) + " already exists in paths4");
-    }
-
-    this->paths4[key] = path;
-}
-
-void Sender::add_path6(const char *src_name, const char *dst_name, Path6 &path) {
-    std::array<char, (MAX_NAME_SIZE + 1) * 2> key;
-    memset(key.data(), 0, key.size());
-    strcpy(key.data(), src_name);
-    strcpy(key.data() + MAX_NAME_SIZE + 1, dst_name);
-
-    if (this->paths6.find(key) != this->paths6.end()) {
-        throw std::runtime_error("Path from " + std::string(src_name) + " to " + std::string(dst_name) + " already exists in paths6");
-    }
-
-    this->paths6[key] = path;
-}
-
 /**
- * Set remote IP address for path src_name -> dst_name.
+ * Set dst_ip4 for path src_name -> dst_name.
  * Returns true if the path was found, false otherwise.
- *
- * There is a data race here:
- * The sender thread reads while the receiver thread writes to `dst_addr`.
  */
-bool Sender::set_remote_ip4(const char *src_name, const char *dst_name, uint32_t addr) {
-    // Build the path key.
-    std::array<char, (MAX_NAME_SIZE + 1) * 2> key;
-    memcpy(key.data(), src_name, MAX_NAME_SIZE + 1);
-    memcpy(key.data() + MAX_NAME_SIZE + 1, dst_name, MAX_NAME_SIZE + 1);
-
-    // Search for the path.
-    auto it = this->paths4.find(key);
-    if (it == this->paths4.end()) {
-        return false;
+bool Sender::set_dst_ip4(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], uint32_t ip4, uint64_t index_timestamp_ms) {
+    auto key = build_src_dst_key(src_name, dst_name);
+    auto it = this->paths4_map.find(key);
+    if (it == this->paths4_map.end()) {
+        return false;  // Path not found
+    }
+    auto path = it->second;
+    if (path->dst_ip_dyn == false) {
+        return true;  // Found static path
     }
 
-    // Skip static or unchanged paths.
-    auto &path = it->second;
-    if (path.dst_addr_dyn == false) {
-        return true;
-    } else if (path.dst_addr == addr) {
-        return true;
+    std::lock_guard<std::mutex> guard(this->mtx);
+
+    path->index_timestamp_ms = index_timestamp_ms;
+
+    if (path->dst_ip4 == ip4) {
+        return true;  // Found same-address path
     }
 
-    // Update path's destination address.
-    path.dst_addr = addr;
-    std::cout << "Destination for path " << src_name << " -> " << dst_name << " updated to " << inet_ntoa({addr}) << std::endl;
+    path->dst_ip4 = ip4;
+    std::cout << "Destination for path " << src_name << " -> " << dst_name
+              << " updated to " << ip_to_str(ip4) << std::endl;
 
     return true;
 }
 
 /**
- * Set remote IP address for path src_name -> dst_name.
+ * Set dst_ip6 for path src_name -> dst_name.
  * Returns true if the path was found, false otherwise.
- *
- * There is a data race here:
- * The sender thread reads while the receiver thread writes to `dst_addr`.
  */
-bool Sender::set_remote_ip6(const char *src_name, const char *dst_name, const void *addr) {
-    // Build the path key.
-    std::array<char, (MAX_NAME_SIZE + 1) * 2> key;
-    memcpy(key.data(), src_name, MAX_NAME_SIZE + 1);
-    memcpy(key.data() + MAX_NAME_SIZE + 1, dst_name, MAX_NAME_SIZE + 1);
-
-    // Search for the path.
-    auto it = this->paths6.find(key);
-    if (it == this->paths6.end()) {
-        return false;
+bool Sender::set_dst_ip6(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], const uint8_t ip6[16], uint64_t index_timestamp_ms) {
+    auto key = build_src_dst_key(src_name, dst_name);
+    auto it = this->paths6_map.find(key);
+    if (it == this->paths6_map.end()) {
+        return false;  // Path not found
+    }
+    auto path = it->second;
+    if (path->dst_ip_dyn == false) {
+        return true;  // Found static path
     }
 
-    // Skip static or unchanged paths.
-    auto &path = it->second;
-    if (path.dst_addr_dyn == false) {
-        return true;
-    } else if (memcmp(path.dst_addr, addr, 16) == 0) {
-        return true;
+    std::lock_guard<std::mutex> guard(this->mtx);
+
+    path->index_timestamp_ms = index_timestamp_ms;
+
+    if (memcmp(path->dst_ip6, ip6, 16) == 0) {
+        return true;  // Found same-address path
     }
 
-    // Update path's destination address.
-    memcpy(path.dst_addr, addr, 16);
-
-    // Log the path's IP change.
-    char ip[INET6_ADDRSTRLEN];
-    inet_ntop(AF_INET6, addr, ip, INET6_ADDRSTRLEN);
-    std::cout << "Destination for path " << src_name << " -> " << dst_name << " updated to " << ip << std::endl;
+    memcpy(path->dst_ip6, ip6, 16);
+    std::cout << "Destination for path " << src_name << " -> " << dst_name
+              << " updated to " << ip_to_str(ip6) << std::endl;
 
     return true;
+}
+
+/**
+ * Set dst_ip4 for paths matching * -> dst_name.
+ */
+void Sender::set_dyn_dst_ip4(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], uint32_t ip4, uint64_t index_timestamp_ms) {
+    if (index_timestamp_ms == 0) {
+        return;  // Not dynamic on sender (src_name).
+    }
+
+    auto dst_key = build_dst_key(dst_name);
+    auto it = this->dyn_dst_paths4.find(dst_key);
+    if (it == this->dyn_dst_paths4.end()) {
+        return;  // No dynamic paths to dst_name.
+    }
+    auto &paths = it->second;
+    assert(paths.empty() == false);
+
+    std::lock_guard<std::mutex> guard(this->mtx);
+
+    for (auto path : paths) {
+        assert(path->dst_ip_dyn == true);
+
+        if (path->dst_ip4 == ip4) {
+            continue;
+        } else if (path->index_timestamp_ms >= index_timestamp_ms) {
+            continue;
+        }
+
+        path->dst_ip4 = ip4;
+        path->index_timestamp_ms = index_timestamp_ms;
+        std::cout << "Destination for path " << path->src_name << " -> " << path->dst_name
+                  << " updated to " << ip_to_str(ip4)
+                  << " (from " << src_name << ")" << std::endl;
+    }
+}
+
+/**
+ * Set dst_ip6 for paths matching * -> dst_name.
+ */
+void Sender::set_dyn_dst_ip6(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], const uint8_t ip6[16], uint64_t index_timestamp_ms) {
+    if (index_timestamp_ms == 0) {
+        return;  // Not dynamic on sender (src_name).
+    }
+
+    auto dst_key = build_dst_key(dst_name);
+    auto it = this->dyn_dst_paths6.find(dst_key);
+    if (it == this->dyn_dst_paths6.end()) {
+        return;  // No dynamic paths to dst_name.
+    }
+    auto &paths = it->second;
+    assert(paths.empty() == false);
+
+    std::lock_guard<std::mutex> guard(this->mtx);
+
+    for (auto path : paths) {
+        assert(path->dst_ip_dyn == true);
+
+        if (memcmp(path->dst_ip6, ip6, 16) == 0) {
+            continue;
+        } else if (path->index_timestamp_ms >= index_timestamp_ms) {
+            continue;
+        }
+
+        memcpy(path->dst_ip6, ip6, 16);
+        path->index_timestamp_ms = index_timestamp_ms;
+        std::cout << "Destination for path " << path->src_name << " -> " << path->dst_name
+                  << " updated to " << ip_to_str(ip6)
+                  << " (from " << src_name << ")" << std::endl;
+    }
 }

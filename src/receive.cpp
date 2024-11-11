@@ -57,7 +57,7 @@ void Receiver::open() {
         throw std::runtime_error(err);
     }
 
-    struct bpf_program fp;
+    bpf_program fp;
     char filter_exp[] = R"(
         inbound and (
             ip and (
@@ -89,14 +89,14 @@ void Receiver::open() {
 }
 
 void Receiver::loop() {
-    auto cb = [](u_char *user, const struct pcap_pkthdr *h, const u_char *bytes) {
+    auto cb = [](u_char *user, const pcap_pkthdr *h, const u_char *bytes) {
         ((Receiver *)user)->receive(h, bytes);
     };
     pcap_loop(this->handle, 0, cb, (u_char *)this /* = user */);
     throw std::runtime_error("pcap_loop failed: " + std::string(pcap_geterr(this->handle)));
 }
 
-void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
+void Receiver::receive(const pcap_pkthdr *pkthdr, const u_char *packet) {
     int packet_len = pkthdr->caplen;
     int64_t received_timestamp_ms = (int64_t)pkthdr->ts.tv_sec * 1000 + pkthdr->ts.tv_usec / 1000;
 
@@ -114,17 +114,17 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
     uint8_t ip_version = (packet[0] >> 4) & 0x0F;
     switch (ip_version) {
     case 4: {
-        auto iph = (struct iphdr *)packet;
+        auto iph = (iphdr *)packet;
         SKIP(sizeof(*iph));
 
         char src_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &(iph->saddr), src_ip, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &iph->saddr, src_ip, sizeof(src_ip));
 
         int ttl = iph->ttl;
 
         switch (iph->protocol) {
         case IPPROTO_TCP: {
-            auto tcph = (struct tcphdr *)packet;
+            auto tcph = (tcphdr *)packet;
             SKIP(sizeof(*tcph));
 
             auto pf = (PacketFormat *)packet;
@@ -137,17 +137,19 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             }
 
             char *src_name = pf->src_name;
-            src_name[MAX_NAME_SIZE] = '\0';
+            src_name[MAX_NAME_SIZE - 1] = '\0';
 
             char *dst_name = pf->dst_name;
-            dst_name[MAX_NAME_SIZE] = '\0';
+            dst_name[MAX_NAME_SIZE - 1] = '\0';
 
             int dst_port = ntohs(tcph->dest);
 
-            auto found = sender.set_remote_ip4(dst_name, src_name, iph->saddr);
+            auto found = sender.set_dst_ip4(dst_name, src_name, iph->saddr, pf->index_timestamp_ms);
             if (found == false) {
                 break;
             }
+
+            sender.set_dyn_dst_ip4(pf->other.src_name, pf->other.dst_name, pf->other.ip.v4, pf->other.index_timestamp_ms);
 
             metrics.add_received_point(
                 pf->index_timestamp_ms,
@@ -163,7 +165,7 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             break;
         }
         case IPPROTO_UDP: {
-            auto udph = (struct udphdr *)packet;
+            auto udph = (udphdr *)packet;
             SKIP(sizeof(*udph));
 
             auto pf = (PacketFormat *)packet;
@@ -176,17 +178,19 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             }
 
             char *src_name = pf->src_name;
-            src_name[MAX_NAME_SIZE] = '\0';
+            src_name[MAX_NAME_SIZE - 1] = '\0';
 
             char *dst_name = pf->dst_name;
-            dst_name[MAX_NAME_SIZE] = '\0';
+            dst_name[MAX_NAME_SIZE - 1] = '\0';
 
             int dst_port = ntohs(udph->dest);
 
-            auto found = sender.set_remote_ip4(dst_name, src_name, iph->saddr);
+            auto found = sender.set_dst_ip4(dst_name, src_name, iph->saddr, pf->index_timestamp_ms);
             if (found == false) {
                 break;
             }
+
+            sender.set_dyn_dst_ip4(pf->other.src_name, pf->other.dst_name, pf->other.ip.v4, pf->other.index_timestamp_ms);
 
             metrics.add_received_point(
                 pf->index_timestamp_ms,
@@ -202,7 +206,7 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             break;
         }
         case IPPROTO_ICMP: {
-            auto icmph = (struct icmphdr *)packet;
+            auto icmph = (icmphdr *)packet;
             SKIP(sizeof(*icmph));
 
             auto pf = (PacketFormat *)packet;
@@ -215,18 +219,20 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             }
 
             char *src_name = pf->src_name;
-            src_name[MAX_NAME_SIZE] = '\0';
+            src_name[MAX_NAME_SIZE - 1] = '\0';
 
             char *dst_name = pf->dst_name;
-            dst_name[MAX_NAME_SIZE] = '\0';
+            dst_name[MAX_NAME_SIZE - 1] = '\0';
 
             // Use ICMP sequence number as destination port.
             int dst_port = ntohs(icmph->un.echo.sequence);
 
-            auto found = sender.set_remote_ip4(dst_name, src_name, iph->saddr);
+            auto found = sender.set_dst_ip4(dst_name, src_name, iph->saddr, pf->index_timestamp_ms);
             if (found == false) {
                 break;
             }
+
+            sender.set_dyn_dst_ip4(pf->other.src_name, pf->other.dst_name, pf->other.ip.v4, pf->other.index_timestamp_ms);
 
             metrics.add_received_point(
                 pf->index_timestamp_ms,
@@ -245,17 +251,17 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
         break;
     }
     case 6: {
-        auto iph = (struct ip6_hdr *)packet;
+        auto iph = (ip6_hdr *)packet;
         SKIP(sizeof(*iph));
 
         char src_ip[INET6_ADDRSTRLEN];
-        inet_ntop(AF_INET6, &(iph->ip6_src), src_ip, INET6_ADDRSTRLEN);
+        inet_ntop(AF_INET6, &iph->ip6_src, src_ip, sizeof(src_ip));
 
         int ttl = iph->ip6_hlim;
 
         switch (iph->ip6_nxt) {
         case IPPROTO_TCP: {
-            auto tcph = (struct tcphdr *)packet;
+            auto tcph = (tcphdr *)packet;
             SKIP(sizeof(*tcph));
 
             auto pf = (PacketFormat *)packet;
@@ -268,17 +274,19 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             }
 
             char *src_name = pf->src_name;
-            src_name[MAX_NAME_SIZE] = '\0';
+            src_name[MAX_NAME_SIZE - 1] = '\0';
 
             char *dst_name = pf->dst_name;
-            dst_name[MAX_NAME_SIZE] = '\0';
+            dst_name[MAX_NAME_SIZE - 1] = '\0';
 
             int dst_port = ntohs(tcph->dest);
 
-            auto found = sender.set_remote_ip6(dst_name, src_name, &(iph->ip6_src));
+            auto found = sender.set_dst_ip6(dst_name, src_name, iph->ip6_src.s6_addr, pf->index_timestamp_ms);
             if (found == false) {
                 break;
             }
+
+            sender.set_dyn_dst_ip6(pf->other.src_name, pf->other.dst_name, pf->other.ip.v6, pf->other.index_timestamp_ms);
 
             metrics.add_received_point(
                 pf->index_timestamp_ms,
@@ -294,7 +302,7 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             break;
         }
         case IPPROTO_UDP: {
-            auto udph = (struct udphdr *)packet;
+            auto udph = (udphdr *)packet;
             SKIP(sizeof(*udph));
 
             auto pf = (PacketFormat *)packet;
@@ -307,17 +315,19 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             }
 
             char *src_name = pf->src_name;
-            src_name[MAX_NAME_SIZE] = '\0';
+            src_name[MAX_NAME_SIZE - 1] = '\0';
 
             char *dst_name = pf->dst_name;
-            dst_name[MAX_NAME_SIZE] = '\0';
+            dst_name[MAX_NAME_SIZE - 1] = '\0';
 
             int dst_port = ntohs(udph->dest);
 
-            auto found = sender.set_remote_ip6(dst_name, src_name, &(iph->ip6_src));
+            auto found = sender.set_dst_ip6(dst_name, src_name, iph->ip6_src.s6_addr, pf->index_timestamp_ms);
             if (found == false) {
                 break;
             }
+
+            sender.set_dyn_dst_ip6(pf->other.src_name, pf->other.dst_name, pf->other.ip.v6, pf->other.index_timestamp_ms);
 
             metrics.add_received_point(
                 pf->index_timestamp_ms,
@@ -333,7 +343,7 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             break;
         }
         case IPPROTO_ICMPV6: {
-            auto icmph = (struct icmp6_hdr *)packet;
+            auto icmph = (icmp6_hdr *)packet;
             SKIP(sizeof(*icmph));
 
             auto pf = (PacketFormat *)packet;
@@ -346,18 +356,20 @@ void Receiver::receive(const struct pcap_pkthdr *pkthdr, const u_char *packet) {
             }
 
             char *src_name = pf->src_name;
-            src_name[MAX_NAME_SIZE] = '\0';
+            src_name[MAX_NAME_SIZE - 1] = '\0';
 
             char *dst_name = pf->dst_name;
-            dst_name[MAX_NAME_SIZE] = '\0';
+            dst_name[MAX_NAME_SIZE - 1] = '\0';
 
             // Use ICMPv6 sequence number as destination port
             int dst_port = ntohs(icmph->icmp6_seq);
 
-            auto found = sender.set_remote_ip6(dst_name, src_name, &(iph->ip6_src));
+            auto found = sender.set_dst_ip6(dst_name, src_name, iph->ip6_src.s6_addr, pf->index_timestamp_ms);
             if (found == false) {
                 break;
             }
+
+            sender.set_dyn_dst_ip6(pf->other.src_name, pf->other.dst_name, pf->other.ip.v6, pf->other.index_timestamp_ms);
 
             metrics.add_received_point(
                 pf->index_timestamp_ms,

@@ -14,15 +14,25 @@
 #include <cstdint>
 #include <vector>
 
-const int MAX_NAME_SIZE = 7;
+const int MAX_NAME_SIZE = 8;
 
 struct PacketFormat {
     char magic[4];
     uint32_t unused;
     int64_t index_timestamp_ms;
     int64_t sent_timestamp_ms;
-    char src_name[MAX_NAME_SIZE + 1];
-    char dst_name[MAX_NAME_SIZE + 1];
+    char src_name[MAX_NAME_SIZE];
+    char dst_name[MAX_NAME_SIZE];
+
+    struct {
+        uint64_t index_timestamp_ms;
+        char src_name[MAX_NAME_SIZE];
+        char dst_name[MAX_NAME_SIZE];
+        union {
+            uint32_t v4;
+            uint8_t v6[16];
+        } ip;
+    } other;
 
     // Has to be the last field in the struct for Secret::sign to work.
     char hash[MD5_DIGEST_LENGTH];
@@ -68,7 +78,7 @@ public:
     void init_pf();
 
     void ip4_addrs(uint32_t src_ip, uint32_t dst_ip);
-    void ip6_addrs(const char src_ip[16], const char dst_ip[16]);
+    void ip6_addrs(const uint8_t src_ip[16], const uint8_t dst_ip[16]);
 
     void tcp_ports(uint16_t src_port, uint16_t dst_port);
     void udp_ports(uint16_t src_port, uint16_t dst_port);
@@ -85,7 +95,9 @@ public:
     void checksum_icmp4();
     void checksum_icmp6();
 
-    void pf_names(int64_t index_timestamp_ms, const char src_name[MAX_NAME_SIZE + 1], const char dst_name[MAX_NAME_SIZE + 1]);
+    void pf_names(int64_t index_timestamp_ms, const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE]);
+    void pf_other4(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], uint32_t ip4, uint64_t index_timestamp_ms);
+    void pf_other6(const char src_name[MAX_NAME_SIZE], const char dst_name[MAX_NAME_SIZE], const uint8_t ip6[16], uint64_t index_timestamp_ms);
 };
 
 #endif

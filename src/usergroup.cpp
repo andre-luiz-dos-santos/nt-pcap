@@ -15,7 +15,7 @@
  * @throws std::system_error if setgid or setuid fails.
  */
 void switch_user_and_group(std::string username, std::string groupname) {
-    struct passwd *pw = nullptr;
+    passwd *pw = nullptr;
     if (username != "") {
         pw = getpwnam(username.c_str());
         if (pw == nullptr) {
@@ -23,7 +23,7 @@ void switch_user_and_group(std::string username, std::string groupname) {
         }
     }
 
-    struct group *gr = nullptr;
+    group *gr = nullptr;
     if (groupname != "") {
         gr = getgrnam(groupname.c_str());
         if (gr == nullptr) {
