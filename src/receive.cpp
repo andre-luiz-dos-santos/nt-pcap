@@ -60,10 +60,12 @@ void Receiver::open() {
     bpf_program fp;
     char filter_exp[] = R"(
         inbound and (
-            ip and (
-                (tcp and tcp[20:4] = 0x54455354) or
-                (udp and udp[8:4] = 0x54455354) or
-                (icmp and icmp[8:4] = 0x54455354)
+            (
+                ip and (
+                    (tcp and tcp[20:4] = 0x54455354) or
+                    (udp and udp[8:4] = 0x54455354) or
+                    (icmp and icmp[8:4] = 0x54455354)
+                )
             ) or (
                 ip6 and (
                     (tcp and ip6[60:4] = 0x54455354) or
